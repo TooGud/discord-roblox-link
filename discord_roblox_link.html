@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Link Discord & Roblox</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    h1, h2 {
+      text-align: center;
+    }
+    input, button, textarea {
+      width: 100%;
+      padding: 8px;
+      margin-top: 10px;
+      box-sizing: border-box;
+    }
+    button {
+      cursor: pointer;
+    }
+    #login-btn {
+      display: none;
+      text-align: center;
+      padding: 10px;
+      background: #5865F2;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      margin-top: 15px;
+    }
+    #discord-info {
+      margin-top: 15px;
+      padding: 10px;
+      background: #f4f4f4;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    #status {
+      margin-top: 15px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Link Your Discord & Roblox</h1>
+  <p>
+    Step 1: Log in with Discord.<br>
+    Step 2: Enter your Roblox username.<br>
+    Step 3: We send it to the owner for verification.
+  </p>
+
+  <!-- Login button (Discord OAuth) -->
+  <a id="login-btn" href="YOUR_DISCORD_OAUTH_URL_HERE">Login with Discord</a>
+
+  <!-- Shows after Discord login is successful -->
+  <div id="discord-info" style="display:none;"></div>
+
+  <!-- Roblox link form -->
+  <div id="link-form" style="display:none;">
+    <h2>Roblox Info</h2>
+    <input id="roblox-username" placeholder="Roblox username">
+    <textarea id="extra-notes" placeholder="Extra info (optional)"></textarea>
+    <button id="send-btn" onclick="sendToWebhook()">Send Link to Owner</button>
+  </div>
+
+  <p id="status"></p>
+
+<script>
+  // ========= CONFIG =========
+  const WEBHOOK_URL = "YOUR_WEBHOOK_URL_HERE";
+  // Leave this empty; we’ll get it from the URL hash if present:
+  let accessToken = null;
+  let tokenType = null;
+  let discordUser = null; // will hold { id, username, global_name, avatar, ... }
+
+  // ========= ON LOAD: handle OAuth token =========
+  window.onload = async () => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    accessToken = fragment.get("access_token");
+    tokenType = fragment.get("token_type");
+
+    const loginBtn = document.getElementById("login-btn");
+    const infoBox = document.getElementById("discord-info");
+    const linkForm = document.getElementById("link-form");
+    const status = document.getElementById("status");
+
+    if (!accessToken || !tokenType) {
+      // No token => show login button
+      loginBtn.style.display = "inline-block";
+      infoBox.style.display = "none";
+      linkForm.style.display = "none";
+      return;
+    }
+
+    // We have a token -> fetch Discord user info
+    status.innerText = "Logging in with Discord...";
+    try {
+      const res = await fetch("https://discord.com/api/users/@me", {
+        headers: {
+          "Authorization": `${tokenType} ${accessToken}`
+        }
+      });
+
+      if (!res.ok) {
+        status.innerText = "Failed to fetch Discord info. Try logging in again.";
+        loginBtn.style.display = "inline-block";
+        return;
+      }
+
+      discordUser = await res.json();
+
+      // Show user info
+      const discTag = discordUser.global_name || discordUser.username;
+      infoBox.innerHTML = `
+        <b>Logged in as:</b><br>
+        ID: <code>${discordUser.id}</code><br>
+        Username: <code>${discordUser.username}</code><br>
+        Display: <code>${discTag}</code>
+      `;
+      infoBox.style.display = "block";
+
+      // Show Roblox form
+      linkForm.style.display = "block";
+      loginBtn.style.display = "none";
+      status.innerText = "";
+    } catch (err) {
+      console.error(err);
+      status.innerText = "Error talking to Discord.";
+      loginBtn.style.display = "inline-block";
+    }
+  };
+
+  // ========= SEND TO DISCORD WEBHOOK =========
+  async function sendToWebhook() {
+    const roblox = document.getElementById("roblox-username").value.trim();
+    const extra = document.getElementById("extra-notes").value.trim();
+    const status = document.getElementById("status");
+
+    if (!discordUser) {
+      status.innerText = "You must log in with Discord first.";
+      return;
+    }
+    if (!roblox) {
+      status.innerText = "Please enter your Roblox username.";
+      return;
+    }
+
+    status.innerText = "Sending to owner...";
+
+    const deviceId = getOrCreateDeviceId();
+    const time = new Date().toLocaleString();
+
+    const content = `New Discord ↔ Roblox link submitted.`;
+
+    const embed = {
+      title: "New Link Submission",
+      color: 5763719,
+      fields: [
+        { name: "Discord ID", value: discordUser.id, inline: true },
+        { name: "Discord User", value: `${discordUser.username}`, inline: true },
+        { name: "Display / Global Name", value: discordUser.global_name || "None", inline: false },
+        { name: "Roblox Username", value: roblox, inline: true },
+        { name: "Device ID", value: deviceId, inline: true },
+        { name: "Time", value: time, inline: false },
+        { name: "Extra Info", value: extra || "None", inline: false }
+      ]
+    };
+
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          embeds: [embed]
+        })
+      });
+
+      if (!res.ok) {
+        status.innerText = "Failed to send to Discord (webhook error).";
+        return;
+      }
+
+      status.innerText = "Sent! The owner has your info now.";
+      document.getElementById("send-btn").disabled = true;
+    } catch (err) {
+      console.error(err);
+      status.innerText = "Error sending to webhook.";
+    }
+  }
+
+  // ========= simple device ID =========
+  function getOrCreateDeviceId() {
+    let id = localStorage.getItem("deviceId_linker");
+    if (!id) {
+      id = "dev_" + crypto.randomUUID();
+      localStorage.setItem("deviceId_linker", id);
+    }
+    return id;
+  }
+</script>
+</body>
+</html>
